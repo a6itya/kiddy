@@ -1,27 +1,28 @@
-import React, { useState, useContext } from 'react'; // <-- Add useContext
-import { CenterContext } from '../context/CenterContext'; // <-- Import the vault
+import React, { useState } from 'react';
+import { useCenterContext } from '../context/CenterContext';
+import { createChild, updateChild, deleteChild } from '../services/api';
 
 export default function Rosters() {
-  // 1. Pull global state instead of using local state
-  const {students, setStudents } = useContext(CenterContext);
+  const { students, setStudents, loading } = useCenterContext();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterRoom, setFilterRoom] = useState('All Classrooms');
 
-  // 2. Modal State Management
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false); // Tracks if we are adding or editing
+  const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
-    id: null, firstName: '', lastName: '', age: '', room: 'Toddler Room', parent: '', contact: '', allergies: '', status: 'Active'
+    id: null, firstName: '', lastName: '', age: '', room: 'Toddler Room',
+    parent: '', contact: '', allergies: '', status: 'Active',
   });
 
-  // Filter Logic
-  const filteredStudents = students.filter(student => 
-    student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.parent.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // --- Core Functions ---
+  const filteredStudents = students.filter((student) => {
+    const matchesSearch =
+      student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (student.parent || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRoom = filterRoom === 'All Classrooms' || student.room === filterRoom;
+    return matchesSearch && matchesRoom;
+  });
 
   const openAddModal = () => {
     setFormData({ id: null, firstName: '', lastName: '', age: '', room: 'Toddler Room', parent: '', contact: '', allergies: '', status: 'Active' });
@@ -35,32 +36,40 @@ export default function Rosters() {
     setIsModalOpen(true);
   };
 
-  const closeModal = () => {
-    setIsModalOpen(false);
-  };
+  const closeModal = () => setIsModalOpen(false);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSave = (e) => {
-    e.preventDefault(); // Prevents page reload on submit
-    if (isEditing) {
-      // Find the specific student and update their record
-      setStudents(students.map(s => s.id === formData.id ? formData : s));
-    } else {
-      // Add new student (using Date.now() as a temporary unique ID until we connect PostgreSQL)
-      setStudents([...students, { ...formData, id: Date.now() }]);
-    }
-    closeModal();
-  };
-
-  const handleDelete = () => {
-    // Built-in browser confirmation to prevent accidental deletions
-    if (window.confirm(`Are you sure you want to completely remove ${formData.firstName} ${formData.lastName} from the system?`)) {
-      setStudents(students.filter(s => s.id !== formData.id));
+  const handleSave = async (e) => {
+    e.preventDefault();
+    try {
+      if (isEditing) {
+        const updated = await updateChild(formData.id, formData);
+        setStudents(students.map((s) => s.id === formData.id ? updated : s));
+      } else {
+        const created = await createChild(formData);
+        setStudents([...students, created]);
+      }
       closeModal();
+    } catch (err) {
+      console.error('Save failed:', err);
+      alert('Failed to save student. Is the server running?');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (window.confirm(`Are you sure you want to remove ${formData.firstName} ${formData.lastName}?`)) {
+      try {
+        await deleteChild(formData.id);
+        setStudents(students.filter((s) => s.id !== formData.id));
+        closeModal();
+      } catch (err) {
+        console.error('Delete failed:', err);
+        alert('Failed to delete student. Is the server running?');
+      }
     }
   };
 
@@ -72,7 +81,7 @@ export default function Rosters() {
           <h1 className="text-3xl font-bold text-slate-800">Student Rosters</h1>
           <p className="text-slate-500 mt-1">Manage enrollments, classrooms, and families.</p>
         </div>
-        <button 
+        <button
           onClick={openAddModal}
           className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm"
         >
@@ -82,14 +91,18 @@ export default function Rosters() {
 
       {/* Controls Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex space-x-4">
-        <input 
-          type="text" 
-          placeholder="Search students or parents..." 
+        <input
+          type="text"
+          placeholder="Search students or parents..."
           className="flex-1 border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
-        <select className="border border-slate-300 rounded-lg px-4 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <select
+          value={filterRoom}
+          onChange={(e) => setFilterRoom(e.target.value)}
+          className="border border-slate-300 rounded-lg px-4 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
           <option>All Classrooms</option>
           <option>Toddler Room</option>
           <option>Preschool Explorers</option>
@@ -111,7 +124,12 @@ export default function Rosters() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-700">
-            {filteredStudents.map((student) => (
+            {loading && (
+              <tr>
+                <td colSpan="6" className="p-8 text-center text-slate-400">Loading students...</td>
+              </tr>
+            )}
+            {!loading && filteredStudents.map((student) => (
               <tr key={student.id} className="hover:bg-slate-50 transition-colors">
                 <td className="p-4 font-medium">{student.firstName} {student.lastName}</td>
                 <td className="p-4 text-slate-500">{student.age}</td>
@@ -122,15 +140,15 @@ export default function Rosters() {
                 </td>
                 <td className="p-4">
                   <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    student.status === 'Active' 
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                    student.status === 'Active'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                       : 'bg-amber-50 text-amber-700 border border-amber-200'
                   }`}>
                     {student.status}
                   </span>
                 </td>
                 <td className="p-4 text-right">
-                  <button 
+                  <button
                     onClick={() => openEditModal(student)}
                     className="text-slate-400 hover:text-indigo-600 font-medium text-sm transition-colors"
                   >
@@ -139,10 +157,12 @@ export default function Rosters() {
                 </td>
               </tr>
             ))}
-            {filteredStudents.length === 0 && (
+            {!loading && filteredStudents.length === 0 && (
               <tr>
                 <td colSpan="6" className="p-8 text-center text-slate-500">
-                  No students found matching "{searchTerm}"
+                  {searchTerm || filterRoom !== 'All Classrooms'
+                    ? 'No students match your filters.'
+                    : 'No students enrolled yet. Click "+ Add Student" to get started.'}
                 </td>
               </tr>
             )}
@@ -150,7 +170,7 @@ export default function Rosters() {
         </table>
       </div>
 
-      {/* --- Overlay Modal --- */}
+      {/* Overlay Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200">
@@ -162,7 +182,6 @@ export default function Rosters() {
             </div>
 
             <form onSubmit={handleSave} className="p-6 space-y-6">
-              {/* Grid Layout for Form Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">First Name</label>
@@ -206,17 +225,14 @@ export default function Rosters() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="pt-4 border-t border-slate-200 flex justify-between items-center">
-                {/* Only show Delete if we are editing an existing record */}
                 {isEditing ? (
                   <button type="button" onClick={handleDelete} className="text-rose-600 hover:bg-rose-50 px-4 py-2 rounded-lg font-medium transition-colors">
                     Remove Student
                   </button>
                 ) : (
-                  <div></div> /* Empty div to keep the right-side buttons aligned */
+                  <div />
                 )}
-                
                 <div className="flex space-x-3">
                   <button type="button" onClick={closeModal} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">
                     Cancel

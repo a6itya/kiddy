@@ -1,17 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { getDashboardSummary } from '../services/api';
 
 export default function Dashboard() {
-  const [metrics, setMetrics] = useState({
-    checkedIn: 24,
-    totalCapacity: 35,
-    outstandingBilling: '$2,450.00',
-  });
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const [classrooms, setClassrooms] = useState([
-    { id: 1, name: 'Toddler Room (12-24mo)', current: 6, maxRatio: 4, teachers: 2, status: 'Compliant' },
-    { id: 2, name: 'Preschool Explorers (2-3yo)', current: 12, maxRatio: 12, teachers: 1, status: 'Compliant' },
-    { id: 3, name: 'Pre-K Readiness (4yo)', current: 6, maxRatio: 12, teachers: 0, status: 'Violation Risk' },
-  ]);
+  useEffect(() => {
+    getDashboardSummary()
+      .then(setSummary)
+      .catch((err) => console.error('Dashboard fetch failed:', err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="space-y-8 animate-pulse">
+        <div className="h-8 bg-slate-200 rounded w-64" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => <div key={i} className="h-32 bg-slate-200 rounded-xl" />)}
+        </div>
+        <div className="h-64 bg-slate-200 rounded-xl" />
+      </div>
+    );
+  }
+
+  const { attendance, classrooms } = summary ?? { attendance: { checkedIn: 0, totalCapacity: 0 }, classrooms: [] };
 
   return (
     <div className="space-y-8">
@@ -25,14 +38,14 @@ export default function Dashboard() {
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <p className="text-sm font-medium text-slate-400 uppercase tracking-wider">Attendance</p>
           <div className="flex items-baseline space-x-2 mt-2">
-            <span className="text-3xl font-bold text-slate-800">{metrics.checkedIn}</span>
-            <span className="text-slate-400">/ {metrics.totalCapacity} children active</span>
+            <span className="text-3xl font-bold text-slate-800">{attendance.checkedIn}</span>
+            <span className="text-slate-400">/ {attendance.totalCapacity} children active</span>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full mt-4 overflow-hidden">
-            <div 
-              className="bg-indigo-600 h-2 rounded-full" 
-              style={{ width: `${(metrics.checkedIn / metrics.totalCapacity) * 100}%` }}
-            ></div>
+            <div
+              className="bg-indigo-600 h-2 rounded-full"
+              style={{ width: `${attendance.totalCapacity > 0 ? (attendance.checkedIn / attendance.totalCapacity) * 100 : 0}%` }}
+            />
           </div>
         </div>
 
@@ -47,9 +60,9 @@ export default function Dashboard() {
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <p className="text-sm font-medium text-slate-400 uppercase tracking-wider">Unpaid Invoices</p>
           <div className="flex items-baseline space-x-2 mt-2">
-            <span className="text-3xl font-bold text-rose-600">{metrics.outstandingBilling}</span>
+            <span className="text-3xl font-bold text-rose-600">$0.00</span>
           </div>
-          <p className="text-sm text-slate-500 mt-4">3 accounts overdue for this cycle.</p>
+          <p className="text-sm text-slate-500 mt-4">Billing coming soon.</p>
         </div>
       </div>
 
@@ -60,7 +73,7 @@ export default function Dashboard() {
         </div>
         <div className="divide-y divide-slate-200">
           {classrooms.map((room) => {
-            const ratioLimitReached = room.current > (room.teachers * room.maxRatio);
+            const ratioLimitReached = room.current > room.teachers * room.maxRatio;
             return (
               <div key={room.id} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
@@ -76,8 +89,8 @@ export default function Dashboard() {
                     <p className="text-sm font-semibold text-slate-700">1 teacher per {room.maxRatio} kids</p>
                   </div>
                   <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    ratioLimitReached || room.teachers === 0
-                      ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                    room.teachers === 0 || ratioLimitReached
+                      ? 'bg-rose-50 text-rose-700 border border-rose-200'
                       : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                   }`}>
                     {room.teachers === 0 ? 'Staffing Required' : ratioLimitReached ? 'Ratio Warning' : 'OK'}
@@ -86,6 +99,9 @@ export default function Dashboard() {
               </div>
             );
           })}
+          {classrooms.length === 0 && (
+            <p className="p-6 text-slate-400 text-sm">No classrooms found. Run the seed script to populate rooms.</p>
+          )}
         </div>
       </div>
     </div>
