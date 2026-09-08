@@ -3,19 +3,27 @@ import { useCenterContext } from '../context/CenterContext';
 import { createChild, updateChild, deleteChild } from '../services/api';
 
 export default function Rosters() {
-  const { students, setStudents, classroom, loading } = useCenterContext();
+  const { students, setStudents, classrooms, loading } = useCenterContext();
 
-  const roomNames = classroom.map((room) => room.name);
-  
+  // Room names come from the classrooms API (via CenterContext), not a hardcoded list.
+  const roomNames = classrooms.map((room) => room.name);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRoom, setFilterRoom] = useState('All Classrooms');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
-    id: null, firstName: '', lastName: '', age: '', room: 'Toddler Room',
+    id: null, firstName: '', lastName: '', age: '', room: '',
     parent: '', contact: '', allergies: '', status: 'Active',
   });
+
+  // Ensure the edited child's current room stays selectable even if it's no
+  // longer in the classrooms list (e.g. a legacy record with no room).
+  const modalRoomOptions =
+    formData.room && !roomNames.includes(formData.room)
+      ? [formData.room, ...roomNames]
+      : roomNames;
 
   const filteredStudents = students.filter((student) => {
     const matchesSearch =
@@ -27,7 +35,7 @@ export default function Rosters() {
   });
 
   const openAddModal = () => {
-    setFormData({ id: null, firstName: '', lastName: '', age: '', room: 'Toddler Room', parent: '', contact: '', allergies: '', status: 'Active' });
+    setFormData({ id: null, firstName: '', lastName: '', age: '', room: roomNames[0] ?? '', parent: '', contact: '', allergies: '', status: 'Active' });
     setIsEditing(false);
     setIsModalOpen(true);
   };
@@ -106,9 +114,9 @@ export default function Rosters() {
           className="border border-slate-300 rounded-lg px-4 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
           <option>All Classrooms</option>
-          <option>Toddler Room</option>
-          <option>Preschool Explorers</option>
-          <option>Pre-K Readiness</option>
+          {roomNames.map((name) => (
+            <option key={name}>{name}</option>
+          ))}
         </select>
       </div>
 
@@ -200,9 +208,9 @@ export default function Rosters() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Assigned Classroom</label>
                   <select name="room" value={formData.room} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white">
-                    <option>Toddler Room</option>
-                    <option>Preschool Explorers</option>
-                    <option>Pre-K Readiness</option>
+                    {modalRoomOptions.map((name) => (
+                      <option key={name}>{name}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
