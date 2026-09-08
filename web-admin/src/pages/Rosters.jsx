@@ -3,8 +3,10 @@ import { useCenterContext } from '../context/CenterContext';
 import { createChild, updateChild, deleteChild } from '../services/api';
 
 export default function Rosters() {
-  const { students, setStudents, loading } = useCenterContext();
+  const { students, setStudents, classroom, loading } = useCenterContext();
 
+  const roomNames = classroom.map((room) => room.name);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRoom, setFilterRoom] = useState('All Classrooms');
 
