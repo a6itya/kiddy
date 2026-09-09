@@ -1,109 +1,106 @@
-import React, { useState, useEffect } from 'react';
-import { getDashboardSummary } from '../services/api';
-
+import React, { useState, useEffect } from "react";
+import { getDashboardSummary } from "../services/api";
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
-
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
     getDashboardSummary()
-      .then(setSummary)
-      .catch((err) => console.error('Dashboard fetch failed:', err))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
+      .then((data) => {
+        if (active) setSummary(data);
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+  if (loading)
     return (
-      <div className="space-y-8 animate-pulse">
-        <div className="h-8 bg-slate-200 rounded w-64" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[1, 2, 3].map((i) => <div key={i} className="h-32 bg-slate-200 rounded-xl" />)}
-        </div>
-        <div className="h-64 bg-slate-200 rounded-xl" />
+      <p role="status" className="text-slate-500">
+        Loading center overview…
+      </p>
+    );
+  if (error)
+    return (
+      <div role="alert" className="bg-rose-50 p-6 rounded-xl text-rose-800">
+        <p>{error}</p>
+        <button
+          className="mt-3 underline"
+          onClick={() => setAttempt((n) => n + 1)}
+        >
+          Retry overview
+        </button>
       </div>
     );
-  }
-
-  const { attendance, classrooms } = summary ?? { attendance: { checkedIn: 0, totalCapacity: 0 }, classrooms: [] };
-
+  const { enrollment, classrooms } = summary;
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-800">Center Overview</h1>
-        <p className="text-slate-500 mt-1">Real-time status of your facility.</p>
+      <div className="flex justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800">Center Overview</h1>
+          <p className="text-slate-500 mt-1">
+            Enrollment overview. Daily attendance is not available yet.
+          </p>
+        </div>
+        <button
+          className="text-indigo-700"
+          onClick={() => setAttempt((n) => n + 1)}
+        >
+          Refresh
+        </button>
       </div>
-
-      {/* Top Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <p className="text-sm font-medium text-slate-400 uppercase tracking-wider">Attendance</p>
-          <div className="flex items-baseline space-x-2 mt-2">
-            <span className="text-3xl font-bold text-slate-800">{attendance.checkedIn}</span>
-            <span className="text-slate-400">/ {attendance.totalCapacity} children active</span>
-          </div>
-          <div className="w-full bg-slate-100 h-2 rounded-full mt-4 overflow-hidden">
-            <div
-              className="bg-indigo-600 h-2 rounded-full"
-              style={{ width: `${attendance.totalCapacity > 0 ? (attendance.checkedIn / attendance.totalCapacity) * 100 : 0}%` }}
-            />
-          </div>
+        <div className="bg-white p-6 rounded-xl border border-slate-200">
+          <p className="text-sm text-slate-500">Active enrollment</p>
+          <p className="text-3xl font-bold mt-2">
+            {enrollment.enrolled}{" "}
+            <span className="text-base font-normal text-slate-500">
+              / {enrollment.totalCapacity} capacity
+            </span>
+          </p>
         </div>
-
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <p className="text-sm font-medium text-slate-400 uppercase tracking-wider">Staffing Status</p>
-          <div className="flex items-baseline space-x-2 mt-2">
-            <span className="text-3xl font-bold text-emerald-600">Secure</span>
-          </div>
-          <p className="text-sm text-slate-500 mt-4">All rooms currently within state limits.</p>
+        <div className="bg-white p-6 rounded-xl border border-slate-200">
+          <p className="text-sm text-slate-500">Staffing status</p>
+          <p className="text-xl font-semibold mt-2">Not available</p>
+          <p className="text-sm text-slate-500 mt-3">
+            Live staffing and classroom coverage are not tracked yet.
+          </p>
         </div>
-
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <p className="text-sm font-medium text-slate-400 uppercase tracking-wider">Unpaid Invoices</p>
-          <div className="flex items-baseline space-x-2 mt-2">
-            <span className="text-3xl font-bold text-rose-600">$0.00</span>
-          </div>
-          <p className="text-sm text-slate-500 mt-4">Billing coming soon.</p>
+        <div className="bg-white p-6 rounded-xl border border-slate-200">
+          <p className="text-sm text-slate-500">Unpaid invoices</p>
+          <p className="text-xl font-semibold mt-2">Not available</p>
+          <p className="text-sm text-slate-500 mt-3">
+            Billing is not connected yet.
+          </p>
         </div>
       </div>
-
-      {/* Live Classroom Ratio Tracker */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-200 bg-slate-50">
-          <h2 className="text-lg font-bold text-slate-800">Live Classroom Ratios</h2>
-        </div>
+      <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <h2 className="text-lg font-bold p-6 border-b border-slate-200">
+          Enrollment by classroom
+        </h2>
         <div className="divide-y divide-slate-200">
-          {classrooms.map((room) => {
-            const ratioLimitReached = room.current > room.teachers * room.maxRatio;
-            return (
-              <div key={room.id} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h3 className="font-semibold text-slate-800 text-lg">{room.name}</h3>
-                  <div className="flex space-x-4 mt-1 text-sm text-slate-500">
-                    <span>Children: <strong>{room.current}</strong></span>
-                    <span>Active Teachers: <strong>{room.teachers}</strong></span>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <div className="text-right">
-                    <p className="text-xs text-slate-400 uppercase font-medium">State Legal Ratio</p>
-                    <p className="text-sm font-semibold text-slate-700">1 teacher per {room.maxRatio} kids</p>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    room.teachers === 0 || ratioLimitReached
-                      ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                  }`}>
-                    {room.teachers === 0 ? 'Staffing Required' : ratioLimitReached ? 'Ratio Warning' : 'OK'}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+          {classrooms.map((room) => (
+            <div key={room.id} className="p-6 flex justify-between gap-4">
+              <h3 className="font-semibold">{room.name}</h3>
+              <p>{room.enrolled} enrolled</p>
+            </div>
+          ))}
           {classrooms.length === 0 && (
-            <p className="p-6 text-slate-400 text-sm">No classrooms found. Run the seed script to populate rooms.</p>
+            <p className="p-6 text-slate-500">
+              No classrooms have been configured.
+            </p>
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

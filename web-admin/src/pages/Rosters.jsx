@@ -1,87 +1,146 @@
-import React, { useState } from 'react';
-import { useCenterContext } from '../context/CenterContext';
-import { createChild, updateChild, deleteChild } from '../services/api';
+import React, { useState, useRef, useEffect } from "react";
+import { useCenterContext } from "../context/CenterContext";
+import { createChild, updateChild, withdrawChild } from "../services/api";
 
 export default function Rosters() {
-  const { students, setStudents, classrooms, loading } = useCenterContext();
+  const { students, setStudents, classrooms, loading, error, retry } =
+    useCenterContext();
 
   // Room names come from the classrooms API (via CenterContext), not a hardcoded list.
   const roomNames = classrooms.map((room) => room.name);
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterRoom, setFilterRoom] = useState('All Classrooms');
+  const actionPending = useRef(false);
+  const dialogRef = useRef(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterRoom, setFilterRoom] = useState("");
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  useEffect(() => {
+    if (isModalOpen) dialogRef.current?.showModal();
+  }, [isModalOpen]);
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
-    id: null, firstName: '', lastName: '', age: '', room: '',
-    parent: '', contact: '', allergies: '', status: 'Active',
+    id: null,
+    firstName: "",
+    lastName: "",
+    age: "",
+    room: "",
+    classroomId: "",
+    parent: "",
+    contact: "",
+    allergies: "",
+    status: "Active",
   });
-
-  // Ensure the edited child's current room stays selectable even if it's no
-  // longer in the classrooms list (e.g. a legacy record with no room).
-  const modalRoomOptions =
-    formData.room && !roomNames.includes(formData.room)
-      ? [formData.room, ...roomNames]
-      : roomNames;
 
   const filteredStudents = students.filter((student) => {
     const matchesSearch =
       student.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (student.parent || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRoom = filterRoom === 'All Classrooms' || student.room === filterRoom;
+      (student.parent || "").toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRoom = !filterRoom || student.classroomId === filterRoom;
     return matchesSearch && matchesRoom;
   });
 
   const openAddModal = () => {
-    setFormData({ id: null, firstName: '', lastName: '', age: '', room: roomNames[0] ?? '', parent: '', contact: '', allergies: '', status: 'Active' });
+    setFormData({
+      id: null,
+      firstName: "",
+      lastName: "",
+      age: "",
+      room: roomNames[0] ?? "",
+      classroomId: classrooms[0]?.id ?? "",
+      parent: "",
+      contact: "",
+      allergies: "",
+      status: "Active",
+    });
+    setSaveError("");
     setIsEditing(false);
     setIsModalOpen(true);
   };
 
   const openEditModal = (student) => {
-    setFormData(student);
+    setSaveError("");
+    setFormData({
+      ...student,
+      age: student.age || "",
+      parent: student.parent || "",
+      contact: student.contact || "",
+      allergies: student.allergies || "",
+      classroomId: student.classroomId || "",
+    });
     setIsEditing(true);
     setIsModalOpen(true);
   };
 
-  const closeModal = () => setIsModalOpen(false);
+  const closeModal = () => {
+    if (!actionPending.current) setIsModalOpen(false);
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
+  const performAction = async (work) => {
+    if (actionPending.current) return;
+    actionPending.current = true;
+    setSaving(true);
+    setSaveError("");
     try {
+      await work();
+      setIsModalOpen(false);
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      actionPending.current = false;
+      setSaving(false);
+    }
+  };
+  const handleSave = (e) => {
+    e.preventDefault();
+    performAction(async () => {
       if (isEditing) {
         const updated = await updateChild(formData.id, formData);
-        setStudents(students.map((s) => s.id === formData.id ? updated : s));
+        setStudents((current) =>
+          current.map((s) => (s.id === updated.id ? updated : s)),
+        );
       } else {
         const created = await createChild(formData);
-        setStudents([...students, created]);
+        setStudents((current) => [...current, created]);
       }
-      closeModal();
-    } catch (err) {
-      console.error('Save failed:', err);
-      alert('Failed to save student. Is the server running?');
+    });
+  };
+  const handleWithdraw = () => {
+    if (actionPending.current) return;
+    if (
+      window.confirm(
+        `Mark ${formData.firstName} ${formData.lastName} inactive? Their profile and attendance history will be kept.`,
+      )
+    ) {
+      performAction(async () => {
+        await withdrawChild(formData.id);
+        setStudents((current) =>
+          current.map((s) =>
+            s.id === formData.id ? { ...s, status: "Inactive" } : s,
+          ),
+        );
+      });
     }
   };
 
-  const handleDelete = async () => {
-    if (window.confirm(`Are you sure you want to remove ${formData.firstName} ${formData.lastName}?`)) {
-      try {
-        await deleteChild(formData.id);
-        setStudents(students.filter((s) => s.id !== formData.id));
-        closeModal();
-      } catch (err) {
-        console.error('Delete failed:', err);
-        alert('Failed to delete student. Is the server running?');
-      }
-    }
-  };
+  if (error)
+    return (
+      <div role="alert" className="bg-rose-50 p-6 rounded-xl text-rose-800">
+        <p>{error}</p>
+        <button className="mt-3 underline" onClick={retry}>
+          Retry roster
+        </button>
+      </div>
+    );
 
   return (
     <div className="space-y-6 relative">
@@ -89,9 +148,12 @@ export default function Rosters() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-slate-800">Student Rosters</h1>
-          <p className="text-slate-500 mt-1">Manage enrollments, classrooms, and families.</p>
+          <p className="text-slate-500 mt-1">
+            Manage enrollments, classrooms, and families.
+          </p>
         </div>
         <button
+          disabled={loading || classrooms.length === 0}
           onClick={openAddModal}
           className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-sm"
         >
@@ -103,19 +165,23 @@ export default function Rosters() {
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex space-x-4">
         <input
           type="text"
+          aria-label="Search students or parents"
           placeholder="Search students or parents..."
           className="flex-1 border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
         <select
+          aria-label="Filter by classroom"
           value={filterRoom}
           onChange={(e) => setFilterRoom(e.target.value)}
           className="border border-slate-300 rounded-lg px-4 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
-          <option>All Classrooms</option>
-          {roomNames.map((name) => (
-            <option key={name}>{name}</option>
+          <option value="">All Classrooms</option>
+          {classrooms.map((room) => (
+            <option key={room.id} value={room.id}>
+              {room.name}
+            </option>
           ))}
         </select>
       </div>
@@ -136,42 +202,54 @@ export default function Rosters() {
           <tbody className="divide-y divide-slate-200 text-slate-700">
             {loading && (
               <tr>
-                <td colSpan="6" className="p-8 text-center text-slate-400">Loading students...</td>
+                <td colSpan="6" className="p-8 text-center text-slate-400">
+                  Loading students...
+                </td>
               </tr>
             )}
-            {!loading && filteredStudents.map((student) => (
-              <tr key={student.id} className="hover:bg-slate-50 transition-colors">
-                <td className="p-4 font-medium">{student.firstName} {student.lastName}</td>
-                <td className="p-4 text-slate-500">{student.age}</td>
-                <td className="p-4">{student.room}</td>
-                <td className="p-4 text-indigo-600 hover:underline cursor-pointer">
-                  {student.parent}
-                  <div className="text-xs text-slate-400 no-underline">{student.contact}</div>
-                </td>
-                <td className="p-4">
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                    student.status === 'Active'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 border border-amber-200'
-                  }`}>
-                    {student.status}
-                  </span>
-                </td>
-                <td className="p-4 text-right">
-                  <button
-                    onClick={() => openEditModal(student)}
-                    className="text-slate-400 hover:text-indigo-600 font-medium text-sm transition-colors"
-                  >
-                    Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {!loading &&
+              filteredStudents.map((student) => (
+                <tr
+                  key={student.id}
+                  className="hover:bg-slate-50 transition-colors"
+                >
+                  <td className="p-4 font-medium">
+                    {student.firstName} {student.lastName}
+                  </td>
+                  <td className="p-4 text-slate-500">{student.age}</td>
+                  <td className="p-4">{student.room}</td>
+                  <td className="p-4 text-indigo-600 hover:underline cursor-pointer">
+                    {student.parent}
+                    <div className="text-xs text-slate-400 no-underline">
+                      {student.contact}
+                    </div>
+                  </td>
+                  <td className="p-4">
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        student.status === "Active"
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          : "bg-amber-50 text-amber-700 border border-amber-200"
+                      }`}
+                    >
+                      {student.status}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <button
+                      onClick={() => openEditModal(student)}
+                      className="text-slate-400 hover:text-indigo-600 font-medium text-sm transition-colors"
+                    >
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
             {!loading && filteredStudents.length === 0 && (
               <tr>
                 <td colSpan="6" className="p-8 text-center text-slate-500">
-                  {searchTerm || filterRoom !== 'All Classrooms'
-                    ? 'No students match your filters.'
+                  {searchTerm || filterRoom !== ""
+                    ? "No students match your filters."
                     : 'No students enrolled yet. Click "+ Add Student" to get started.'}
                 </td>
               </tr>
@@ -182,79 +260,233 @@ export default function Rosters() {
 
       {/* Overlay Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200">
+        <dialog
+          ref={dialogRef}
+          aria-label={isEditing ? "Edit student" : "Add student"}
+          onCancel={(event) => {
+            event.preventDefault();
+            closeModal();
+          }}
+          className="fixed inset-0 m-0 h-screen w-screen max-h-none max-w-none bg-slate-900/50 backdrop-blur-sm open:flex items-center justify-center p-4"
+        >
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-slate-200">
             <div className="p-6 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
               <h2 className="text-2xl font-bold text-slate-800">
-                {isEditing ? 'Edit Student Profile' : 'Add New Student'}
+                {isEditing ? "Edit Student Profile" : "Add New Student"}
               </h2>
-              <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 text-2xl font-semibold">&times;</button>
+              <button
+                aria-label="Close student form"
+                disabled={saving}
+                onClick={closeModal}
+                className="text-slate-400 hover:text-slate-600 text-2xl font-semibold"
+              >
+                &times;
+              </button>
             </div>
 
             <form onSubmit={handleSave} className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">First Name</label>
-                  <input type="text" name="firstName" required value={formData.firstName} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+              {saveError && (
+                <p
+                  role="alert"
+                  className="text-rose-700 bg-rose-50 p-3 rounded-lg"
+                >
+                  {saveError}
+                </p>
+              )}
+              <fieldset disabled={saving} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label
+                      htmlFor="student-firstName"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      First Name
+                    </label>
+                    <input
+                      type="text"
+                      id="student-firstName"
+                      name="firstName"
+                      maxLength={100}
+                      required
+                      value={formData.firstName}
+                      onChange={handleInputChange}
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="student-lastName"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      Last Name
+                    </label>
+                    <input
+                      type="text"
+                      id="student-lastName"
+                      name="lastName"
+                      maxLength={100}
+                      required
+                      value={formData.lastName}
+                      onChange={handleInputChange}
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="student-age"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      Age
+                    </label>
+                    <input
+                      type="text"
+                      id="student-age"
+                      name="age"
+                      maxLength={50}
+                      required
+                      value={formData.age}
+                      onChange={handleInputChange}
+                      placeholder="e.g. 2 yrs"
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="student-classroomId"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      Assigned Classroom
+                    </label>
+                    <select
+                      id="student-classroomId"
+                      name="classroomId"
+                      required
+                      value={formData.classroomId}
+                      onChange={handleInputChange}
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white"
+                    >
+                      <option value="">Choose a classroom</option>
+                      {classrooms.map((room) => (
+                        <option key={room.id} value={room.id}>
+                          {room.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="student-parent"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      Parent/Guardian Name
+                    </label>
+                    <input
+                      type="text"
+                      id="student-parent"
+                      name="parent"
+                      maxLength={255}
+                      required
+                      value={formData.parent}
+                      onChange={handleInputChange}
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="student-contact"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      Emergency Contact Phone
+                    </label>
+                    <input
+                      type="text"
+                      id="student-contact"
+                      name="contact"
+                      maxLength={50}
+                      required
+                      value={formData.contact}
+                      onChange={handleInputChange}
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label
+                      htmlFor="student-allergies"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      Known Allergies / Medical Notes
+                    </label>
+                    <input
+                      type="text"
+                      id="student-allergies"
+                      name="allergies"
+                      maxLength={4000}
+                      value={formData.allergies}
+                      onChange={handleInputChange}
+                      placeholder="e.g. Peanuts, Dairy, None"
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label
+                      htmlFor="student-status"
+                      className="block text-sm font-medium text-slate-700 mb-1"
+                    >
+                      Enrollment Status
+                    </label>
+                    <select
+                      id="student-status"
+                      name="status"
+                      value={formData.status}
+                      onChange={handleInputChange}
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white"
+                    >
+                      <option>Active</option>
+                      <option>Waitlist</option>
+                      <option>Inactive</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Last Name</label>
-                  <input type="text" name="lastName" required value={formData.lastName} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Age / DOB</label>
-                  <input type="text" name="age" required value={formData.age} onChange={handleInputChange} placeholder="e.g. 2 yrs or 05/12/2022" className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Assigned Classroom</label>
-                  <select name="room" value={formData.room} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white">
-                    {modalRoomOptions.map((name) => (
-                      <option key={name}>{name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Parent/Guardian Name</label>
-                  <input type="text" name="parent" required value={formData.parent} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Emergency Contact Phone</label>
-                  <input type="text" name="contact" required value={formData.contact} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Known Allergies / Medical Notes</label>
-                  <input type="text" name="allergies" value={formData.allergies} onChange={handleInputChange} placeholder="e.g. Peanuts, Dairy, None" className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Enrollment Status</label>
-                  <select name="status" value={formData.status} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white">
-                    <option>Active</option>
-                    <option>Waitlist</option>
-                    <option>Inactive</option>
-                  </select>
-                </div>
-              </div>
 
-              <div className="pt-4 border-t border-slate-200 flex justify-between items-center">
-                {isEditing ? (
-                  <button type="button" onClick={handleDelete} className="text-rose-600 hover:bg-rose-50 px-4 py-2 rounded-lg font-medium transition-colors">
-                    Remove Student
-                  </button>
-                ) : (
-                  <div />
-                )}
-                <div className="flex space-x-3">
-                  <button type="button" onClick={closeModal} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">
-                    Cancel
-                  </button>
-                  <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm">
-                    {isEditing ? 'Save Changes' : 'Enroll Student'}
-                  </button>
+                <div className="pt-4 border-t border-slate-200 flex justify-between items-center">
+                  {isEditing ? (
+                    <button
+                      type="button"
+                      disabled={saving || formData.status === "Inactive"}
+                      onClick={handleWithdraw}
+                      className="text-rose-600 hover:bg-rose-50 px-4 py-2 rounded-lg font-medium transition-colors"
+                    >
+                      Mark inactive
+                    </button>
+                  ) : (
+                    <div />
+                  )}
+                  <div className="flex space-x-3">
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={closeModal}
+                      className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={saving}
+                      type="submit"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-sm"
+                    >
+                      {saving
+                        ? "Saving…"
+                        : isEditing
+                          ? "Save Changes"
+                          : "Enroll Student"}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              </fieldset>
             </form>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );
